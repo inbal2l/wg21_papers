@@ -1,0 +1,606 @@
+\documentclass[11pt]{article}
+
+\usepackage{color}
+\usepackage{xcolor}
+\usepackage{soul}
+\usepackage{fullpage}
+\usepackage[colorlinks, allcolors=blue]{hyperref}
+\usepackage{listings}
+\usepackage{parskip}
+\usepackage{url}
+\usepackage{courier}
+\usepackage[T1]{fontenc}
+% \usepackage{libertine}%% Only as example for the romans/sans fonts
+\usepackage[scaled=0.85]{beramono}
+\usepackage{changepage}
+\usepackage{nameref}
+
+% Solarized colour scheme for listings
+\definecolor{solarized@base03}{HTML}{002B36}
+\definecolor{solarized@base02}{HTML}{073642}
+\definecolor{solarized@base01}{HTML}{586e75}
+\definecolor{solarized@base00}{HTML}{657b83}
+\definecolor{solarized@base0}{HTML}{839496}
+\definecolor{solarized@base1}{HTML}{93a1a1}
+\definecolor{solarized@base2}{HTML}{EEE8D5}
+\definecolor{solarized@base3}{HTML}{FDF6E3}
+\definecolor{solarized@yellow}{HTML}{B58900}
+\definecolor{solarized@orange}{HTML}{CB4B16}
+\definecolor{solarized@red}{HTML}{DC322F}
+\definecolor{solarized@magenta}{HTML}{D33682}
+\definecolor{solarized@violet}{HTML}{6C71C4}
+\definecolor{solarized@blue}{HTML}{268BD2}
+\definecolor{solarized@cyan}{HTML}{2AA198}
+\definecolor{solarized@green}{HTML}{859900}
+
+\lstset{
+  basicstyle=\footnotesize\ttfamily,
+}
+
+% Define C++ syntax highlighting colour scheme
+\lstdefinelanguage{cpp}{
+  language=C++,
+  basicstyle=\footnotesize\ttfamily,
+  numbers=left,
+  numberstyle=\footnotesize,
+  tabsize=2,
+  breaklines=true,
+  escapeinside={@}{@},
+  numberstyle=\tiny\color{solarized@base01},
+  keywordstyle=\color{solarized@green},
+  stringstyle=\color{solarized@cyan}\ttfamily,
+  identifierstyle=\color{solarized@blue},
+  commentstyle=\color{solarized@base01},
+  emphstyle=\color{solarized@red},
+  frame=single,
+  rulecolor=\color{solarized@base2},
+  rulesepcolor=\color{solarized@base2},
+  showstringspaces=false,
+}
+
+\lstdefinelanguage{diff}{
+  morecomment=[f][\color{blue}]{@@},           % group identifier
+  morecomment=[f][\color{red}]{-},             % deleted lines
+  morecomment=[f][\color{green!50!black}]{+},  % added lines
+  morecomment=[f][\color{magenta}]{---},       % diff header lines
+  morecomment=[f][\color{magenta}]{+++},
+}
+
+\lstdefinelanguage{plus}{
+  basicstyle=\footnotesize\ttfamily\color{green!50!black},
+  emph={see,below,TypeSwitch,unspecified},
+  emphstyle=\itshape
+}
+
+\lstdefinelanguage{signature}{
+  basicstyle=\ttfamily\color{green!50!black},
+  emph={see,below,TypeSwitch,unspecified},
+  emphstyle=\itshape
+}
+
+\newcommand{\desc}[1]{\textit{#1}}
+\newcommand{\requires}{\desc{Requires}}
+\newcommand{\effects}{\desc{Effects}}
+\newcommand{\precondition}{\desc{Precondition}}
+\newcommand{\postcondition}{\desc{Postcondition}}
+\newcommand{\throws}{\desc{Throws}}
+\newcommand{\returns}{\desc{Returns}}
+\newcommand{\remarks}{\desc{Remarks}}
+\newcommand{\exceptionsafety}{\desc{Exception Safety}}
+
+\newcommand{\fullref}[1]{\ref{#1} \nameref{#1}}
+
+\date{}
+\title{Querying the Alignment of an Object [Aligning Alignment]}
+
+\newcommand{\emailaddress}{sinbal2l@gmail.com}
+\newcommand{\email}{\href{mailto:\emailaddress}{\emailaddress}}
+
+\begin{document}
+
+\maketitle\vspace{-2cm}
+
+\begin{flushright}
+  \begin{tabular}{ll}
+  Document \#:&P2152R0\\
+  Date:       &\date{\today}\\
+  Project:    &Programming Language C++\\
+  Audience:   &EWGI\\
+  Reply-to:   &\author{Inbal Levi\\
+              &<\href{mailto:sinbal2l@gmail.com}{sinbal2l@gmail.com}>\\
+
+  \end{tabular}
+\end{flushright}
+
+\section{Introduction}
+The alignment requirements of an object or type can be specified in C++ by using the alignas(x) specifier (where x is a power of 2).
+
+The current specification of the alignof operator (7.6.2.5 [expr.alignof]) allows it to be applied only to types, not to objects. Since the alignment attribute may be applied to objects, and since existing practice permits querying the alignment of objects, it should be considered whether to allow this in Standard C++ as well.\hyperlink{CWGtopic}{[9]}
+
+The following paper discusses design issues that need to be considered \textbf{in order to allow consistently querying the alignment of an object (vs. the object's type) using the alignof operator.}
+
+
+
+\section{Motivation and Scope}
+
+C++11 introduced alignment control and query capabilities through a paper from 2007 \hyperlink{AlignmentCpp}{[10]}.
+
+Unfortunately, the current alignof operator is inconsistent between different compilers, and inconsistent within the standard itself.
+
+Further research has exposed a divergence between C's objects and C++'s objects, which I believe is the result of the similar yet different syntax for struct in the languages, resulting in the current alignment section in the standard not resolving critical issues sufficiently. These issues, as well as suggested fixes, are described in this paper.
+
+In essence, I suggest the following code is ill-formed (as is its C equivalent, thanks to Error 2):
+\begin{lstlisting}[language=diff]
+
+typedef struct alignas(32){
+}U; 
+
+typedef struct alignas(16){     // Error 1: weaker alignment of object than its members' alignment
+    U u;
+}V; 
+
+int main() {
+    alignas(16) U u;            // Error 2: weaker alignment of object than the alignment of its type
+}
+\end{lstlisting}
+
+I suggest that the following code be well-formed, with alignof(u) == 64 and alignof(V) == 32:
+
+\begin{lstlisting}[language=diff]
+
+typedef struct alignas(16) {
+}U; 
+
+typedef struct alignas(32) {     // OK
+    U u;
+}V; 
+
+int main() {
+    alignas(64) U u; 
+    alignof(u);                 // Not valid in C++20: only alignof(type) is allowed. 
+    alignof(V);                 // Not addressed in the standard: alignment of type with aligned members.
+}
+\end{lstlisting}
+
+\section{Definitions} 
+The (relevant) definitions from the C++ standard regarding the alignment attribute are as follows:
+
+\begin{itemize}
+
+    \item Fundamental alignment: An alignment less than or equal to the greatest alignment supported by the implementation in all contexts, which is equal to alignof(std::max\_align\_t)
+
+    \item Extended alignment: An alignment greater than alignof(std::max\_align\_t). 
+    \item Over-aligned type: A type having an extended alignment requirement.
+    \item Stricter alignment: An alignment with a greater value.
+    \item Weaker alignment: An alignment with a lesser value.
+    
+\end{itemize}
+
+\section{Proposed Changes: Suggested Design }
+
+In order to qualify the alignment of an expression, a few issues described below need to be resolved. The design in this section relies on the following assumptions:
+
+ \begin{enumerate}
+ 
+    \item As has been discussed before, as well as for aligning the behaviour with C, the alignment is not part of the type system. As a result, the alignment of an object shouldn't apply as a parameter for the overloading mechanism.
+
+    \item The alignment of a type should be resolved by all the different limitations which are applied by its declarations as well as its definition (including hardware limitations, if such exist).
+
+    \item The alignment of an object can't be weaker than the alignment of its object type. This results from section 6.7.6 Alignment [basic.align/1]:
+    \begin{lstlisting}[language=diff]
+[...] An object type imposes an alignment requirement on every object of that type; stricter
+alignment can be requested using the alignment specifier (9.12.2)
+    \end{lstlisting}
+
+\end{enumerate}
+
+% With these assumptions in mind, a few design suggestions are discussed in this section. 
+
+\textbf{Sections [4.1], [4.2] describe incompatibility issues with C. There are additional topics derived from and additional to those changes, all  changes are described in section [5]} 
+
+\subsection{The alignment of an object type's declaration vs. object definition}
+
+Consider the following C code: (\url{https://godbolt.org/z/kv9NkF})
+
+\begin{lstlisting}[language=diff]
+typedef struct U U;
+struct U {
+}__attribute__((aligned (32))); 
+
+int main() {
+    _Alignas(16) U u;       // Gcc, Clang: both compilers throw error 
+    _Alignas(64) U v;       // OK
+    _Alignof(v);            // Clang: warning: 'alignof' applied to an expression is a GNU extension.
+                            // Gcc, Clang: alignof(v) == 64
+}  
+\end{lstlisting}
+
+And its equivalent C++ code: (\url{https://godbolt.org/z/HqoFnw})
+
+\begin{lstlisting}[language=diff]
+typedef struct alignas(32){
+}U; 
+
+int main() {
+    alignas(16) U u;        // Gcc ,MSVC: allow specifying weaker alignment than of type, Clang: error. (1)
+    alignof(u);             // Gcc: alignof(u) == 16, Clang, MSVC: error
+    alignas(64) U v;        // OK
+    alignof(v);             // Clang: warning: 'alignof' applied to an expression is a GNU extension.
+                            // Gcc, Clang: alignof(v) == 64, MSVC: error. (2)
+}
+\end{lstlisting}
+The issues presented in the example are as follows:
+\begin{itemize}
+
+    \item Issue (1): As described above, the C++ standard \hyperlink{CppStandard}{[14]} (as well as the C standard \hyperlink{CStandard}{[13]}) specifies that an object type's alignment restricts the object's alignment \hyperlink{6.7.6/1}{[1]},  resulting in: an object can't be defined with alignas() specifier which describes alignment that is weaker than its type. 
+    However, the standard does not state the result of describing such an alignment.
+    \item Issue (2): There are multiple references to functionality derived from allowing alignof(exp), however, the standard does not allow alignof(exp). As a result, there is inconsistency between different compilers, and between C and C++ standards.
+\end{itemize}
+\textbf{Proposed changes:} 
+
+\begin{itemize}
+    \item Issue (1): Add that describing a weaker alignment for an object than required by its object type will resolve with an error. (Aligned with C, Aligned with Clang, Breaking Gcc's and MSVC's behaviour)
+    
+    \item Issue (2): Standardize the existing practice - allow alignof(exp). this will affect additional features such as the alignment of a pointer and of a reference.
+    
+\end{itemize}
+
+\subsection{The alignment of an object with aligned members}
+
+The alignment of an object in C is resolved to the strictest amongst its members [6.7.5]\hyperlink{6.7.5}{[4]}.
+
+Consider the following C code:  (\url{https://godbolt.org/z/wtJvS_})
+\begin{lstlisting}[language=diff] 
+
+typedef struct V V;
+typedef struct S S;
+typedef struct U U;
+
+struct V {} __attribute__((aligned (64))); 
+struct S {} __attribute__((aligned (32))); 
+struct U{
+    S s;
+    V v;
+} __attribute__((aligned (16)));        // This alignment is ignored in both gcc and clang
+
+int main() {
+   alignof(U);                          // alignof(U) is valid, and equals 64
+}
+
+\end{lstlisting}
+
+\\And its equivalent C++ code: (\url{https://godbolt.org/z/5Wx-V2})
+\begin{lstlisting}[language=diff]
+
+typedef struct alignas(64) V {} V; 
+typedef struct alignas(32) S {} S; 
+typedef struct alignas(16) U{           // Gcc: ignored, Clang: error, MSVC: warning. (1)
+    S s;
+    V v;
+} U; 
+
+int main() {
+   alignof(U);                          // When compiles, alignof(U) equals 64. (2)
+}
+
+\end{lstlisting}
+
+A section with the example which is described here exists in the standard \hyperlink{9.12.2/5}{[3]}, yet the wording diverges from C [6.7.5]\hyperlink{6.7.5}{[4]}. 
+As a result, two specifications are missing here: 
+\begin{itemize}
+    \item Issue (1): There is no rule defining whether describing an alignment of an object which is weaker than the alignment required by its members should result in an error, a warning, or be ignored.
+    \item Issue (2): There is no rule defining what is the alignment of an object, whose members (in the broad sense) have alignment requirements, and so this is an open issue. (Although, in section [basic.align]\hyperlink{6.7.6/2}{[2]}, in the example's explanation, it's assumed that the struct's alignment is restricted by its members' alignment) 
+\end{itemize}
+
+\textbf{Proposed changes:}
+
+\begin{itemize}
+
+    \item Issue (1): Add describing a weaker alignment for an object than is required by its members will resolve with an error. (Stricter than C, Aligned with Clang, Breaking Gcc's and MSVC's behaviour)
+    
+    \item Issue (2): Restore the rule from C (replacing "type" with "entity"), this will result in: The alignment of an entity should be stricter than or equal to its members' alignment. 
+    %Following are two options we consider reasonable. (suggestions are welcome):
+
+%\begin{enumerate}
+    
+   % \item Disregard the rule from C: It might be reasonable to consider overriding the alignment required by members, when object's alignment is specified. (We believe this is not the right direction)
+%\end{enumerate}
+\end{itemize}
+
+\section{Proposed Changes: Alternative Design}
+
+\subsection{The alignment of an object type's declaration vs. object definition [4.1]}
+
+For issue (1), I suggested: \\
+Add that describing a weaker alignment for an object than required by its object type will resolve with an error. (Aligned with C, Aligned with Clang, Breaking Gcc's and MSVC's behaviour)
+
+the following alternatives could be considered:
+\begin{itemize}
+    \item \textbf{Option 1:} Add that describing a weaker alignment for an object than required by its object type will be ignored. (Breaking C behaviour, aligned with Gcc's)
+    
+    \item \textbf{Option 2:} Add that describing a weaker alignment for an object than required by its object type will resolve with a warning. (Breaking C behaviour, contain change for all compilers)
+\end{itemize}
+
+In both cases the suggestions are for behaviour weaker than of C's struct, and will increase the difference between the languages regarding the struct keyword, as well as ignore the alignment explicit demand, therefore I don't recommend it. 
+
+\subsection{The alignment of an object with aligned members [4.2]}
+
+For issue (1), I suggested: \\
+Add describing a weaker alignment for an object than is required by its members will resolve with an error. (Stricter than C, Aligned with Clang, Breaking Gcc's and MSVC's behaviour)
+
+
+the following alternatives could be considered:
+\begin{itemize}
+    \item \textbf{Option 1}: Add describing a weaker alignment for an object than is required by its members will be ignored. (Aligned with C, Breaking Clang's behaviour)
+    
+    \item \textbf{Option 2}: Add describing a weaker alignment for an object than is required by its members will resolve with a warning. (Aligned with C (with the addition of a warning), Aligned with MSVC, Breaking Clang's behaviour)
+\end{itemize}
+
+The incentive for a stricter rule suggested in section [4.2] is to avoid specified instructions not executed. Since alignment is a requirement explicitly specified, I believe not implementing the alignment requirement should result with an error. In addition, since the C struct's syntax is different, it will only break C++ code, \textbf{in which there is already an inconsistency on this topic.}
+
+
+
+\section{Proposed Changes: Impact On the Standard}
+
+\begin{enumerate}
+    \item In alignment definition [basic.align]: 
+    \begin{itemize}
+        \item Specify in [basic.align/1] that the alignment can be affected by hardware: in our opinion, this is beyond the scope of the standard, however, since there is already acknowledgement of this (for example, in section atomic \hyperlink{31.7.1/1,2}{[8]}) I suggest adding it to alignment definition as well.
+    
+        \item Move the sentence from the end of [basic.align/1] referring to alignment of type vs. object type to a different bullet. Add describing a weaker alignment will result in an error. (\textbf{Aligned with C, Aligned with Clang, Breaking Gcc's and MSVC's behaviour})
+    \end{itemize}    
+        
+    \item In alignof() definition [expr.alignof]:
+    \begin{itemize}
+        \item Add in [expr.alignof/1] allowing the alignof(exp). This will result in additional standard features becoming valid (such as alignof reference \hyperlink{7.6.2.5/3}{[7]}, currently unsupported). 
+    
+        \item Add querying the alignment of an object declared with different alignment values in different translation units is UB. (It is already specified under [dcl.align], but it is also relevant to the alignof() expression)
+        
+    \end{itemize}
+\item In alignas() definition [dcl.align]:   
+    \begin{itemize}
+    
+        \item Restore the [dcl.align/5] section, aligning it with C. Add the combined effect of all alignment-specifiers in a declaration shall not specify an alignment less strict than of its members (in the broad sense). 
+        
+        \item Moreover, I suggest to specify explicitly, that describing such an alignment will resolve with and error. (\textbf{Stricter than C, Aligned with Clang, Breaking Gcc's and MSVC's behaviour})
+    \end{itemize}
+\item Add minor fix: add existing practice of alignment in reinterpret\_cast \hyperlink{7.6.1.9/7}{[6]}.
+
+
+\end{enumerate}
+
+
+
+\newpage
+
+\section{Proposed Wording}
+
+\begin{itemize}
+
+    \item Adding a restriction regarding stating alignment of an object weaker than its members:\newline
+    
+    \textbf{6.7.6 Alignment\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad[basic.align]}
+    
+1 Object types have alignment requirements (6.8.1, 6.8.2) which place restrictions on the addresses at
+which an object of that type may be allocated. An alignment is an implementation-defined integer value 
+representing the number of bytes between successive addresses at which a given object can be allocated. \hl{In addition to alignment requirements, the alignment of an entity can be affected  by its memory location as well as the hardware type.} 
+
+\hl{2} An object type imposes an alignment requirement on every object of that type; stricter alignment can be
+requested using the alignment specifier (9.12.2). \hl{describing a weaker alignment will result in an error.
+
+3} A fundamental alignment is represented by an alignment less than or equal to the greatest alignment supported
+by the implementation in all contexts, which is equal to alignof(std::max-
+\_align\_t) (17.2).
+The alignment
+required for a type might be different when it is used as the type of a complete object and when it is used as
+the type of a subobject. [...]\newline
+
+    \item Changing Alignment section as follows, allowing alignof(exp), and specifying UB for querying alignment of an entity declared with different alignments in different translation units:\newline
+
+\textbf{7.6.2.5 Alignof \qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad[expr.alignof]}
+
+1 An alignof expression yields the alignment requirement of its operand type. The operand shall be a type-id
+representing a complete object type, \hl{or an unparenthesized id-expression or an unparenthesized data class member access (7.6.1.4) of a complete object,} or an array thereof, or a reference to one of those types.
+
+2 The result is a prvalue of type std::size\_t. [\emph{Note}: An alignof expression is an integral constant
+expression (7.7). The type std::size\_t is defined in the standard header <cstddef> (17.2.1, 17.2.4). \emph{— end note}]
+
+\hl{3 Querying the alignment of an object type declared with different alignments in different translation units will result in undefined behavior.
+
+4} When alignof is applied to a reference type, the result is the alignment of the referenced type. When
+alignof is applied to an array type, the result is the alignment of the element type.
+\newline
+
+\item Fix the wording in alignment specifier section, define the alignment value of an object with aligned members, and \textbf{add specifying otherwise yields an error}:\newline
+
+\textbf{9.12.2 Alignment specifier\quad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad[dcl.align]}
+
+5 The combined effect of all alignment-specifiers in a declaration shall not specify an alignment that is less strict
+than the alignment that would \hl{otherwise be required for the type of the object or member
+being declared, specifying such an alignment will result in an error. Moreover, the combined effect of all alignment-specifiers in a declaration shall not specify an alignment that is less strict than the alignment that would} be required for the entity being declared if all alignment-specifiers appertaining
+to that entity were omitted. [\emph{Example}:
+\begin{lstlisting}[language=diff]
+struct alignas(8) S {};
+struct alignas(1) U {
+S s;
+}; // error: U specifies an alignment that is less strict than if the alignas(1) were omitted.
+
+\end{lstlisting}
+\emph{— end example}]\newline
+    \item Add existing practice of alignment in reinterpret\_cast \hyperlink{7.6.1.9/7}{[6]}:\newline\newline
+\textbf{7.6.1.9 Reinterpret cast \qquad\qquad\qquad\qquad\qquad\qquad\qquad [expr.reinterpret.cast]}
+
+7 [...] [Note: Converting a prvalue of type pointer to T 1 to the type pointer to T 2  (where T1 and T2 are object types and where the alignment requirements of T2 are no strcter than those of T1) and back to its original type yields the original pointer value, \hl{as well as its alignment.} 
+end note]
+
+
+
+\end{itemize}
+
+
+
+\section{Future Topics To Be Examined}
+
+Consistency of std::allocate::allocate and std::get\_temporary\_buffer support for object with smaller alignment than the type.
+
+
+
+\section{Acknowledgements}
+
+\begin{itemize}
+    \item \textbf{Daveed Vandevoorde} Many thanks for reviewing this paper in detail at different stages, providing guidance and useful corrections and directions. 
+    \item \textbf{Attila Feher} For reviewing initial ideas, provide very useful and detailed feedback in addition to very helpful detailed examples.
+    \item \textbf{JF Bastien} For reviewing the draft, adding his directions for a better cohesion with core.
+    \item \textbf{Michael Wong} For reviewing the draft, adding his valuable corrections and input. 
+    \\
+    \item \textbf{Everyone on EWG, CWG} for contributing to a knowledgeable discussion on this topic.
+    \end{itemize}
+
+
+
+\newpage
+
+
+
+\section{References}
+
+\renewcommand{\section}[5]{}
+
+\begin{thebibliography}{5}
+
+    \hypertarget{6.7.6/1}{}
+    \bibitem[1] -6.7.6 Alignment \hspace*{0pt}\hfill [basic.align/1]
+    \newline
+\begin{lstlisting}[language=diff]
+1 Object types have alignment requirements (6.8.1, 6.8.2) which place restrictions on the addresses at
+which an object of that type may be allocated. An alignment is an implementation-defined integer value 
+representing the number of bytes between successive addresses at which a given object can be allocated. 
+An object type imposes an alignment requirement on every object of that type; stricter alignment can be
+requested using the alignment specifier (9.12.2).
+\end{lstlisting}
+
+ \hypertarget{6.7.6/2}{}
+    \bibitem[2] -6.7.6 Alignment \hspace*{0pt}\hfill [basic.align/2]
+    \newline
+\begin{lstlisting}[language=diff]
+2 A fundamental alignment is represented by an alignment less than or equal to the greatest alignment 
+supported by the implementation in all contexts, which is equal to alignof(std::max_align_t) (17.2). 
+The alignment required for a type might be different when it is used as the type of a complete object 
+and when it is used as the type of a subobject. [Example:
+
+struct B { long double d; };
+struct D : virtual B { char c; };
+
+When D is the type of a complete object, it will have a subobject of type B, so it must be aligned
+appropriately for a long double. If D appears as a subobject of another object that also has B as a 
+virtual base class, the B subobject might be part of a different subobject, reducing the alignment 
+requirements on the D subobject.   end example] The result of the alignof operator reflects the align-
+ment requirement of the type in the complete-object case.
+\end{lstlisting}
+
+    
+    \hypertarget{9.12.2/5}{}   
+    \bibitem[3] -9.12.2 Alignment specifier \hspace*{0pt}\hfill[dcl.align/5]
+    \newline
+\begin{lstlisting}[language=diff]
+5 The combined effect of all alignment-specifiers in a declaration shall not specify an alignment that
+is less strict than the alignment that would be required for the entity being declared if all alignment-
+specifiers appertaining to that entity were omitted. [Example:
+
+    struct alignas(8) S{};
+    struct alignas(1) U{         // This declaration should not be allowed
+    S s;
+    };  // error: U specifies an alignment that is less strict than if the alignas(1) were omitted. 
+
+end example]
+    \end{lstlisting}
+
+    \hypertarget{6.7.5}{}   
+    \bibitem[4] -6.7.5 Alignment specifier\hspace*{0pt}\hfill [from C standard]
+    
+\begin{lstlisting}[language=diff]
+
+5 The combined effect of all alignment specifiers in a declaration shall not specify an alignment that
+is less strict than the alignment that would otherwise be required for the type of the object or member
+being declared.
+
+\end{lstlisting}
+
+    \hypertarget{9.12.2/6}{}   
+    \bibitem[5] -9.12.2 Alignment specifier\hspace*{0pt}\hfill [dcl.align/6]
+    \newline
+\begin{lstlisting}[language=diff]
+6 If the defining declaration of an entity has an alignment-specifier, any non-defining declaration of
+that entity shall either specify equivalent alignment or have no alignment-specifier.         Conversely, if any declaration of an entity has an alignment-specifier, every defining declaration of 
+that entity shall specify an equivalent alignment. No diagnostic is required if declarations of an 
+entity have different alignment- specifiers in different translation units. [Example:
+
+    // Translation unit #1:
+    struct S { int x; } s, *p = &s;
+    // Translation unit #2:
+    struct alignas(16) S; // ill-formed, no diagnostic required: definition of S lacks alignment
+    extern S* p;
+
+end example]
+\end{lstlisting}
+
+    \hypertarget{7.6.1.9/7}{}   
+    \bibitem[6] -7.6.1.9 Reinterpret cast\hspace*{0pt}\hfill [expr.reinterpret.cast/7]
+    \newline
+    \begin{lstlisting}[language=diff]
+7 An object pointer can be explicitly converted to an object pointer of a different type.65 When a prva-
+lue v of object pointer type is converted to the object pointer type “pointer to cv T”, the result is 
+static_cast<cv T*>(static_cast<cv void*>(v)). [Note: Converting a prvalue of type “pointer to T1” to 
+the type "pointer to T2" (where T1 and T2 are object types and where the alignment requirements of T2 are 
+no stricter than those of T1) and back to its original type yields the original pointer value. end note]
+    \end{lstlisting}
+    
+   \hypertarget{7.6.2.5/3}{}   
+    \bibitem[7] -7.6.2.5 Alignof\hspace*{0pt}\hfill [expr.alignof/3]
+    \newline
+    \begin{lstlisting}[language=diff]
+3 When alignof is applied to a reference type, the result is the alignment of the referenced type.
+    \end{lstlisting}
+    
+    \hypertarget{31.7.1/1,2}{}   
+    \bibitem[8] -31.7.1 Operations\hspace*{0pt}\hfill [atomics.ref.ops/1,2]
+    \newline
+    \begin{lstlisting}[language=diff]
+static constexpr size_t required_alignment;
+1 The alignment required for an object to be referenced by an atomic reference, which is at least
+alignof(T).
+2 [Note: Hardware could require an object referenced by an atomic_ref to have stricter alignment (6.7.6)
+than other objects of type T. Further, whether operations on an atomic_ref are lock-free could depend
+on the alignment of the referenced object. For example, lock-free operations on std::complex<double>
+could be supported only if aligned to 2*alignof(double).   end note]
+    \end{lstlisting}
+
+    % Papers reference
+    
+    \hypertarget{CWGtopic}{}\bibitem[9]-CWG closed issues
+    \emph{CodeSourcery, Compaq, EDG, HP, IBM, Intel, Red Hat, and SGI. Additional contributions were provided by a variety of individuals}\newline
+    \url{ http://wiki.edg.com/pub/Wg21summer2020/CoreWorkingGroup/cwg_closed.html#1008}
+    
+    \hypertarget{AlignmentCpp}{}\bibitem[10]-Adding alignment support to the C++ programming language / wording (2007)
+    \emph{Attila (Farkas) Fehér, Clark Nelson}\newline
+    \url{http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2341.pdf}
+    
+    \hypertarget{CAndCppAlignment}{}\bibitem[11]-C and C++ Alignment Compatibility (2010)
+    \emph{Lawrence Crowl, Daveed Vandevoorde}\newline
+    \url{http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1507.htm}
+    
+    \hypertarget{DynamicAlignment}{}\bibitem[12]-Dynamic memory allocation for over-aligned data (2016)
+    \emph{Clark Nelson}\newline
+    \url{http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0035r4.html}
+    
+    \hypertarget{CStandard}{}\bibitem[13]-Current C draft (2019)
+    \emph{}\newline
+    \url{http://www.open-std.org/jtc1/sc22/wg14/www/docs/n2454.pdf}
+
+    \hypertarget{CppStandard}{}\bibitem[14]-Current C++ draft (2020)
+    \emph{}\newline
+    \url{http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/n4861.pdf}
+
+\end{thebibliography}
+
+\end{document}
